@@ -11,11 +11,11 @@ interface PriceChartProps {
 }
 
 const STRATEGY_COLORS = [
-  '#7c3aed', // Violet
-  '#ec4899', // Pink
-  '#8b5cf6', // Indigo
-  '#f59e0b', // Amber
-  '#10b981', // Emerald
+  '#4F46E5', // Wealthfront Indigo
+  '#7C3AED', // Violet
+  '#0EA5E9', // Sky Blue
+  '#10B981', // Emerald
+  '#A855F7', // Purple
 ];
 
 export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
@@ -27,7 +27,6 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
   const updateDataAndSeries = useCallback(() => {
     if (!chartRef.current || !priceSeriesRef.current || !chartContainerRef.current) return;
 
-    // Ensure terminal width is correct after layout shifts
     chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
 
     // A. Update Base Price
@@ -42,7 +41,6 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
     // B. Update Equity Curves
     const currentIds = new Set(results.map(r => r.strategyId));
     
-    // Remove stale series
     for (const [id, series] of equitySeriesMapRef.current.entries()) {
       if (!currentIds.has(id)) {
         chartRef.current.removeSeries(series);
@@ -50,7 +48,6 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
       }
     }
 
-    // Add/Update current series
     results.forEach((res, index) => {
       let series = equitySeriesMapRef.current.get(res.strategyId);
       if (!series) {
@@ -74,23 +71,21 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
       })));
     });
 
-    // C. Fit content
     chartRef.current.timeScale().fitContent();
   }, [data, results]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // 1. Initialize Chart
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#64748b',
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: "'Inter', system-ui, sans-serif",
       },
       grid: {
-        vertLines: { color: 'rgba(226, 232, 240, 0.4)' },
-        horzLines: { color: 'rgba(226, 232, 240, 0.4)' },
+        vertLines: { color: 'rgba(0, 0, 0, 0.03)' },
+        horzLines: { color: 'rgba(0, 0, 0, 0.03)' },
       },
       width: chartContainerRef.current.clientWidth,
       height: height,
@@ -101,12 +96,13 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
       rightPriceScale: {
         borderColor: '#f1f5f9',
         visible: true,
-      }
+      },
+      handleScroll: true,
+      handleScale: true,
     });
 
-    // 2. Create Base Price Series
     const priceSeries = chart.addSeries(LineSeries, {
-      color: '#94a3b8',
+      color: '#cbd5e1', // Light slate for benchmark
       lineWidth: 2,
       lineStyle: 1, // Dashed
       title: '标的基准',
@@ -121,7 +117,6 @@ export function PriceChart({ data, results, height = 500 }: PriceChartProps) {
     chartRef.current = chart;
     priceSeriesRef.current = priceSeries;
 
-    // Initial update
     updateDataAndSeries();
 
     const handleResize = () => {
