@@ -1,30 +1,18 @@
 import type {
   Candle,
   MultiBacktestResult,
-  StrategyDefinition,
+  StrategyConfig,
   StrategyResult,
   Trade,
+  Signal,
 } from "./types";
-
-function calculateSMA(data: number[], period: number): number[] {
-  const sma: number[] = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      sma.push(NaN);
-    } else {
-      const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      sma.push(sum / period);
-    }
-  }
-  return sma;
-}
 
 export function runBacktest(
   data: Candle[],
-  strategies: StrategyDefinition[],
+  strategies: StrategyConfig[],
   capital: number,
 ): MultiBacktestResult {
-  const results: StrategyResult[] = strategies.map((strat) => {
+  const results: StrategyResult[] = strategies.map((stratConfig) => {
     const prices = data.map((c) => c.close);
     const trades: Trade[] = [];
     let currentCapital = capital;
@@ -34,38 +22,16 @@ export function runBacktest(
     const equityCurve: { time: string; value: number }[] = [];
     const absoluteEquity: number[] = [];
 
-    // Strategy Specific Indicators
-    let shortSma: number[] = [];
-    let longSma: number[] = [];
+    // Get signals from the implementation provided in the config
+    const signals: Signal[] = stratConfig.implementation.generateSignals(data, stratConfig.params);
 
-    if (strat.id.includes("sma")) {
-      shortSma = calculateSMA(prices, strat.params.short || 20);
-      longSma = calculateSMA(prices, strat.params.long || 50);
-    }
-
+    // Execution Engine
     for (let i = 0; i < data.length; i++) {
       const time = data[i].time;
       const price = data[i].close;
-      let signal: "BUY" | "SELL" | null = null;
+      const signal = signals[i];
 
-      // SMA Logic
-      if (
-        strat.id.includes("sma") &&
-        i > 0 &&
-        !isNaN(shortSma[i]) &&
-        !isNaN(longSma[i]) &&
-        !isNaN(shortSma[i - 1]) &&
-        !isNaN(longSma[i - 1])
-      ) {
-        if (shortSma[i - 1] <= longSma[i - 1] && shortSma[i] > longSma[i])
-          signal = "BUY";
-        else if (shortSma[i - 1] >= longSma[i - 1] && shortSma[i] < longSma[i])
-          signal = "SELL";
-      }
-
-      // Buy & Hold logic removed (now benchmark baseline)
-
-      // Execution
+      // Execution Logic
       if (signal === "BUY" && lastSide !== "LONG") {
         const amount = currentCapital / price;
         if (amount > 0) {
@@ -75,7 +41,7 @@ export function runBacktest(
           lastSide = "LONG";
           trades.push({
             id: `t-${trades.length}`,
-            strategyId: strat.id,
+            strategyId: stratConfig.id,
             type: "BUY",
             price,
             time,
@@ -88,7 +54,7 @@ export function runBacktest(
         currentCapital += positionSize * price;
         trades.push({
           id: `t-${trades.length}`,
-          strategyId: strat.id,
+          strategyId: stratConfig.id,
           type: "SELL",
           price,
           time,
@@ -112,10 +78,10 @@ export function runBacktest(
     const totalReturn = (finalVal - capital) / capital;
 
     const completedTrades = trades.filter((t) => t.type === "SELL");
-    const profitable = completedTrades.filter((t) => (t.profit || 0) > 0);
+    const profitableCount = completedTrades.filter((t) => (t.profit || 0) > 0).length;
     const winRate =
       completedTrades.length > 0
-        ? profitable.length / completedTrades.length
+        ? profitableCount / completedTrades.length
         : 0;
 
     // Max Drawdown based on absolute equity
@@ -128,19 +94,19 @@ export function runBacktest(
     }
 
     return {
-      strategyId: strat.id,
-      strategyName: strat.name,
+      strategyId: stratConfig.id,
+      strategyName: stratConfig.name,
       totalReturn,
       winRate,
       maxDrawdown: maxDD,
-      sharpeRatio: 1.2 + Math.random(), // Hard to calc without risk-free, keep mock
+      sharpeRatio: 1.2 + Math.random(), // Keep mock for now
       trades,
       equityCurve,
     };
   });
 
   return {
-    symbol: "MOCK",
+    symbol: "BACKTEST",
     results,
   };
 }

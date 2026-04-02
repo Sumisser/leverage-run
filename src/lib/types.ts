@@ -9,6 +9,13 @@ export interface Candle {
 
 export type SignalType = "BUY" | "SELL";
 
+export type Signal = "BUY" | "SELL" | null;
+
+export interface BaseStrategy {
+  id: string;
+  generateSignals: (data: Candle[], params: Record<string, any>) => Signal[];
+}
+
 export interface Trade {
   id: string;
   strategyId: string;
@@ -24,6 +31,10 @@ export interface StrategyDefinition {
   id: string;
   name: string;
   params: Record<string, any>;
+}
+
+export interface StrategyConfig extends StrategyDefinition {
+  implementation: BaseStrategy;
 }
 
 export interface StrategyResult {
