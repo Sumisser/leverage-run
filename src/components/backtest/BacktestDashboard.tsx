@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useMemo, useEffect } from "react";
-import { generateMockData } from "@/lib/mock";
 import { runBacktest } from "@/lib/backtest";
-import { Candle, StrategyResult, StrategyDefinition } from "@/lib/types";
+import { Candle, StrategyResult, StrategyConfig } from "@/lib/types";
 import { PriceChart } from "./PriceChart";
 import { StrategySelector } from "./StrategySelector";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,52 +18,87 @@ import {
   ChevronDown,
   Info,
   Scale,
+  RefreshCw
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { DatePickerWithRange } from "@/components/ui/date-range-picker";
+import { format, parseISO, subMonths, subYears, startOfYear } from "date-fns";
+import { zhCN } from "date-fns/locale";
 
-const ASSETS = [
-  { id: "BTC", name: "比特币 (BTC/USDT)" },
-  { id: "ETH", name: "以太坊 (ETH/USDT)" },
-  { id: "AAPL", name: "苹果股票 (AAPL)" },
-  { id: "NVDA", name: "英伟达 (NVDA)" },
-];
+interface AssetInfo {
+  name: string;
+  code: string;
+  fileName: string;
+}
 
 export function BacktestDashboard() {
   const [mounted, setMounted] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState(ASSETS[0]);
+  const [assetsList, setAssetsList] = useState<AssetInfo[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<AssetInfo | null>(null);
+  const [stockData, setStockData] = useState<Candle[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedStrategyIds, setSelectedStrategyIds] = useState<string[]>([
     STRATEGY_CONFIGS[0].id,
   ]);
-  const capital = 100;
+  
+  // Date Range Filtering
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
+  const capital = 10000;
 
   useEffect(() => {
     setMounted(true);
+    fetch('/data/index.json')
+      .then(res => res.json())
+      .then(data => {
+        setAssetsList(data);
+        if (data.length > 0) {
+          setSelectedAsset(data[0]);
+        }
+      })
+      .catch(err => console.error("Failed to load assets index:", err));
   }, []);
 
-  const mockData = useMemo(() => {
-    if (!mounted) return [];
-    const startPrice =
-      selectedAsset.id === "BTC"
-        ? 65000
-        : selectedAsset.id === "AAPL"
-          ? 180
-          : 2500;
-    return generateMockData(500, startPrice);
-  }, [selectedAsset.id, mounted]);
+  useEffect(() => {
+    if (!selectedAsset) return;
+    setLoading(true);
+    fetch(`/data/${selectedAsset.fileName}`)
+      .then(res => res.json())
+      .then(result => {
+        setStockData(result.data);
+        if (result.data.length > 0) {
+          setStartDate(result.data[0].time);
+          setEndDate(result.data[result.data.length - 1].time);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to load asset data:", err);
+        setLoading(false);
+      });
+  }, [selectedAsset]);
 
-  // Compute Benchmark (Buy & Hold) Stats
+  // Apply Date Filtering
+  const filteredData = useMemo(() => {
+    if (!startDate || !endDate) return stockData;
+    return stockData.filter(c => c.time >= startDate && c.time <= endDate);
+  }, [stockData, startDate, endDate]);
+
+  // Compute Benchmark (Buy & Hold) Stats based on filtered range
   const benchmarkResult = useMemo(() => {
-    if (mockData.length < 2) return null;
-    const first = mockData[0].close;
-    const last = mockData[mockData.length - 1].close;
+    if (filteredData.length < 2) return null;
+    const first = filteredData[0].close;
+    const last = filteredData[filteredData.length - 1].close;
     const totalReturn = last / first - 1;
 
-    // Simple Max Drawdown for benchmark
-    let maxPrice = 0;
+    let peak = -Infinity;
     let maxDd = 0;
-    for (const c of mockData) {
-      if (c.close > maxPrice) maxPrice = c.close;
-      const dd = (maxPrice - c.close) / maxPrice;
+    for (const c of filteredData) {
+      if (c.close > peak) peak = c.close;
+      const dd = (peak - c.close) / peak;
       if (dd > maxDd) maxDd = dd;
     }
 
@@ -72,13 +106,13 @@ export function BacktestDashboard() {
       strategyId: "benchmark",
       strategyName: "买入持有 (Benchmark)",
       totalReturn,
-      winRate: 100,
+      winRate: 1, 
       maxDrawdown: maxDd,
       sharpeRatio: 0,
       trades: [],
-      equityCurve: [], // Not needed for leaderboard row
+      equityCurve: [], 
     };
-  }, [mockData]);
+  }, [filteredData]);
 
   const selectedStrats = useMemo(
     () =>
@@ -87,10 +121,10 @@ export function BacktestDashboard() {
   );
 
   const multiResult = useMemo(() => {
-    if (!mounted || mockData.length === 0)
-      return { symbol: "LOADING", results: [] };
-    return runBacktest(mockData, selectedStrats, capital);
-  }, [mockData, selectedStrats, capital, mounted]);
+    if (!mounted || filteredData.length === 0)
+      return { symbol: selectedAsset?.code || "LOADING", results: [] };
+    return runBacktest(filteredData, selectedStrats, capital);
+  }, [filteredData, selectedStrats, capital, mounted, selectedAsset]);
 
   // Combined Results with Alpha
   const leaderboardData = useMemo(() => {
@@ -122,13 +156,7 @@ export function BacktestDashboard() {
     );
   };
 
-  if (!mounted) {
-    return (
-      <div className="flex flex-col min-h-screen p-4 md:p-8 items-center justify-center bg-[#FDF9F3]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
+  if (!mounted) return null;
 
   return (
     <div className="flex flex-col min-h-screen bg-[#FDF9F3] text-[#1A1523]">
@@ -166,48 +194,99 @@ export function BacktestDashboard() {
           </div>
           <div className="text-[11px] font-black uppercase tracking-widest text-[#1A1523]/40 flex items-center gap-2">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            实时数据同步已激活
+            真实市场数据已加载
           </div>
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
           <div className="lg:col-span-9">
-            <Card className="bg-white border-slate-200 card-shadow h-full flex flex-col rounded-3xl overflow-hidden">
+            <Card className="bg-white border-slate-200 card-shadow h-full flex flex-col rounded-3xl overflow-hidden relative">
+              {loading && (
+                <div className="absolute inset-0 z-20 bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-40">同步云端数据...</span>
+                  </div>
+                </div>
+              )}
+              
               <div className="px-6 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
                 <div className="flex items-center gap-4">
                   <div className="relative group">
                     <select
-                      value={selectedAsset.id}
+                      value={selectedAsset?.code || ""}
                       onChange={(e) => {
-                        const asset = ASSETS.find(
-                          (a) => a.id === e.target.value,
+                        const asset = assetsList.find(
+                          (a) => a.code === e.target.value,
                         );
                         if (asset) setSelectedAsset(asset);
                       }}
                       className="appearance-none bg-transparent font-black text-xs text-slate-800 pr-6 cursor-pointer focus:outline-none"
                     >
-                      {ASSETS.map((asset) => (
-                        <option key={asset.id} value={asset.id}>
-                          {asset.name}
+                      {assetsList.map((asset) => (
+                        <option key={asset.code} value={asset.code}>
+                          {asset.name} ({asset.code})
                         </option>
                       ))}
                     </select>
                     <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
                   </div>
                   <div className="h-3 w-[1px] bg-slate-300" />
-                  <div className="hidden lg:flex items-center gap-2">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      收益归一化
-                    </span>
-                    <span className="text-[10px] font-black text-primary">
-                      0% 为起始基准点
-                    </span>
+                  
+                  {/* Quick Range Presets */}
+                  <div className="flex items-center gap-1.5 p-1 bg-slate-100/50 rounded-xl border border-slate-200/50">
+                    {[
+                      { label: "1M", getValue: () => ({ from: subMonths(new Date(), 1), to: new Date() }) },
+                      { label: "1Y", getValue: () => ({ from: subYears(new Date(), 1), to: new Date() }) },
+                      { label: "5Y", getValue: () => ({ from: subYears(new Date(), 5), to: new Date() }) },
+                      { label: "YTD", getValue: () => ({ from: startOfYear(new Date()), to: new Date() }) },
+                      { label: "ALL", getValue: () => ({ from: stockData.length > 0 ? parseISO(stockData[0].time) : new Date(), to: stockData.length > 0 ? parseISO(stockData[stockData.length - 1].time) : new Date() }) },
+                    ].map((p) => {
+                      const isActive = p.label === "ALL" && startDate === stockData[0]?.time && endDate === stockData[stockData.length - 1]?.time;
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => {
+                            const range = p.getValue();
+                            setStartDate(format(range.from, "yyyy-MM-dd"));
+                            setEndDate(format(range.to, "yyyy-MM-dd"));
+                          }}
+                          className={cn(
+                            "px-2 py-1 text-[9px] font-black rounded-lg transition-all uppercase tracking-tight",
+                            isActive 
+                              ? "bg-white text-primary shadow-sm border border-slate-200" 
+                              : "text-slate-400 hover:text-slate-600 hover:bg-white/50"
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="h-3 w-[1px] bg-slate-300" />
+                  
+                  {/* Official Shadcn Date Picker */}
+                  <div className="flex items-center gap-2 scale-[0.85] origin-left">
+                    <DatePickerWithRange
+                      date={{
+                        from: startDate ? parseISO(startDate) : undefined,
+                        to: endDate ? parseISO(endDate) : undefined,
+                      }}
+                      minDate={stockData.length > 0 ? parseISO(stockData[0].time) : undefined}
+                      maxDate={stockData.length > 0 ? parseISO(stockData[stockData.length - 1].time) : undefined}
+                      setDate={(range) => {
+                        if (range?.from) setStartDate(format(range.from, "yyyy-MM-dd"));
+                        if (range?.to) setEndDate(format(range.to, "yyyy-MM-dd"));
+                      }}
+                    />
                   </div>
                 </div>
+
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-widest">
                     <TrendingUp className="h-3 w-3" />
-                    数据已对齐
+                    数据源: EFinance
                   </div>
                   <Settings2 className="h-4 w-4 text-slate-300 hover:text-primary cursor-pointer transition-colors" />
                 </div>
@@ -216,7 +295,7 @@ export function BacktestDashboard() {
               <CardContent className="p-0 flex-1 relative min-h-[480px]">
                 <div className="p-6 h-full flex flex-col justify-center">
                   <PriceChart
-                    data={mockData}
+                    data={filteredData}
                     results={multiResult.results}
                     height={440}
                   />
@@ -260,7 +339,7 @@ export function BacktestDashboard() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Trophy className="h-5 w-5 text-primary" />
-              <h3 className="text-lg heading-serif">策略绩效深度对比排行</h3>
+              <h3 className="text-lg heading-serif">真实市场回测绩效排行</h3>
             </div>
             <div className="text-[10px] items-center text-slate-400 font-bold uppercase tracking-widest flex gap-4">
               <span className="flex items-center gap-1">

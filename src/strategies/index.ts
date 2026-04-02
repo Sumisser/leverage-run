@@ -20,6 +20,25 @@ export const STRATEGY_CONFIGS: StrategyConfig[] = [
   },
 ];
 
+export const STRATEGY_COLORS = [
+  '#7C3AED', // Violet (Primary)
+  '#4F46E5', // Indigo
+  '#0EA5E9', // Sky Blue
+  '#10B981', // Emerald
+  '#F59E0B', // Amber
+  '#EF4444', // Red
+  '#EC4899', // Pink
+  '#06B6D4', // Cyan
+  '#8B5CF6', // Purple
+  '#F43F5E', // Rose
+  '#84CC16', // Lime
+  '#6366F1', // Indigo 500
+];
+
 export function getStrategyConfig(id: string): StrategyConfig | undefined {
   return STRATEGY_CONFIGS.find((config) => config.id === id);
+}
+
+export function getStrategyColor(index: number): string {
+  return STRATEGY_COLORS[index % STRATEGY_COLORS.length];
 }
