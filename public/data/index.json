@@ -1,5 +1,10 @@
 [
   {
+    "name": "三倍做多纳斯达克100ETF-ProShare",
+    "code": "TQQQ",
+    "fileName": "三倍做多纳斯达克100ETF-ProShare_TQQQ.json"
+  },
+  {
     "name": "纳斯达克100ETF-Invesco",
     "code": "QQQ",
     "fileName": "纳斯达克100ETF-Invesco_QQQ.json"
