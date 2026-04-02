@@ -43,6 +43,12 @@ export function BacktestDashboard() {
     STRATEGY_CONFIGS[0].id,
   ]);
   
+  // Market context for multi-asset strategies (e.g. QQQ as signal)
+  const [marketContext, setMarketContext] = useState<Record<string, Candle[]>>({});
+
+  // SMA Periods Multi-selection
+  const [activeSmas, setActiveSmas] = useState<number[]>([]);
+
   // Date Range Filtering
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -57,6 +63,17 @@ export function BacktestDashboard() {
         setAssetsList(data);
         if (data.length > 0) {
           setSelectedAsset(data[0]);
+          
+          // Pre-load QQQ for strategies that need it
+          const qqq = data.find((a: AssetInfo) => a.code === 'QQQ');
+          if (qqq) {
+            fetch(`/data/${qqq.fileName}`)
+              .then(res => res.json())
+              .then(result => {
+                 setMarketContext(prev => ({ ...prev, QQQ: result.data }));
+              })
+              .catch(err => console.error("Failed to load QQQ for market context:", err));
+          }
         }
       })
       .catch(err => console.error("Failed to load assets index:", err));
@@ -70,6 +87,7 @@ export function BacktestDashboard() {
       .then(result => {
         setStockData(result.data);
         if (result.data.length > 0) {
+          // Initialize range to full history of the selected asset
           setStartDate(result.data[0].time);
           setEndDate(result.data[result.data.length - 1].time);
         }
@@ -86,6 +104,32 @@ export function BacktestDashboard() {
     if (!startDate || !endDate) return stockData;
     return stockData.filter(c => c.time >= startDate && c.time <= endDate);
   }, [stockData, startDate, endDate]);
+
+  // Calculate selected SMAs for the base asset
+  const baseSmasMap = useMemo(() => {
+    const results: Record<number, { time: string; value: number }[]> = {};
+    if (stockData.length === 0) return results;
+
+    activeSmas.forEach(period => {
+      if (stockData.length < period) return;
+      
+      const prices = stockData.map(c => c.close);
+      const sma: number[] = [];
+      let sum = 0;
+      for (let i = 0; i < prices.length; i++) {
+         sum += prices[i];
+         if (i >= period) sum -= prices[i - period];
+         if (i < period - 1) sma.push(NaN);
+         else sma.push(sum / period);
+      }
+      
+      results[period] = stockData
+        .map((c, i) => ({ time: c.time, value: sma[i] }))
+        .filter(item => item.time >= startDate && item.time <= endDate && !isNaN(item.value));
+    });
+    
+    return results;
+  }, [stockData, startDate, endDate, activeSmas]);
 
   // Compute Benchmark (Buy & Hold) Stats based on filtered range
   const benchmarkResult = useMemo(() => {
@@ -123,8 +167,8 @@ export function BacktestDashboard() {
   const multiResult = useMemo(() => {
     if (!mounted || filteredData.length === 0)
       return { symbol: selectedAsset?.code || "LOADING", results: [] };
-    return runBacktest(filteredData, selectedStrats, capital);
-  }, [filteredData, selectedStrats, capital, mounted, selectedAsset]);
+    return runBacktest(filteredData, selectedStrats, capital, marketContext);
+  }, [filteredData, selectedStrats, capital, mounted, selectedAsset, marketContext]);
 
   // Combined Results with Alpha
   const leaderboardData = useMemo(() => {
@@ -200,9 +244,9 @@ export function BacktestDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
           <div className="lg:col-span-9">
-            <Card className="bg-white border-slate-200 card-shadow h-full flex flex-col rounded-3xl overflow-hidden relative">
+            <Card className="flex-1 flex flex-col border-none shadow-2xl bg-white/70 backdrop-blur-3xl rounded-[2rem] relative">
               {loading && (
-                <div className="absolute inset-0 z-20 bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
+                <div className="absolute inset-0 z-[70] bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
                   <div className="flex flex-col items-center gap-3">
                     <RefreshCw className="h-6 w-6 text-primary animate-spin" />
                     <span className="text-[10px] font-black uppercase tracking-widest opacity-40">同步云端数据...</span>
@@ -210,9 +254,15 @@ export function BacktestDashboard() {
                 </div>
               )}
               
-              <div className="px-6 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
-                <div className="flex items-center gap-4">
-                  <div className="relative group">
+              <div className="flex flex-wrap items-center justify-between px-3 py-2 border-b border-slate-100 gap-x-3 gap-y-2 relative z-[60] bg-white rounded-t-[2rem]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                  </div>
+
+                  <div className="h-4 w-[1px] bg-slate-200 mx-0.5 flex-shrink-0" />
+
+                  <div className="relative flex items-center flex-shrink-0 max-w-[140px]">
                     <select
                       value={selectedAsset?.code || ""}
                       onChange={(e) => {
@@ -221,38 +271,44 @@ export function BacktestDashboard() {
                         );
                         if (asset) setSelectedAsset(asset);
                       }}
-                      className="appearance-none bg-transparent font-black text-xs text-slate-800 pr-6 cursor-pointer focus:outline-none"
+                      className="appearance-none bg-transparent font-black text-[11px] text-slate-800 pr-5 cursor-pointer focus:outline-none w-full truncate"
                     >
                       {assetsList.map((asset) => (
                         <option key={asset.code} value={asset.code}>
-                          {asset.name} ({asset.code})
+                          {asset.name}
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
                   </div>
-                  <div className="h-3 w-[1px] bg-slate-300" />
+
+                  <div className="h-4 w-[1px] bg-slate-200 mx-0.5 flex-shrink-0" />
                   
                   {/* Quick Range Presets */}
-                  <div className="flex items-center gap-1.5 p-1 bg-slate-100/50 rounded-xl border border-slate-200/50">
+                  <div className="flex items-center gap-0.5 p-0.5 bg-slate-100/60 rounded-lg flex-shrink-0">
                     {[
                       { label: "1M", getValue: () => ({ from: subMonths(new Date(), 1), to: new Date() }) },
+                      { label: "3M", getValue: () => ({ from: subMonths(new Date(), 3), to: new Date() }) },
                       { label: "1Y", getValue: () => ({ from: subYears(new Date(), 1), to: new Date() }) },
                       { label: "5Y", getValue: () => ({ from: subYears(new Date(), 5), to: new Date() }) },
+                      { label: "10Y", getValue: () => ({ from: subYears(new Date(), 10), to: new Date() }) },
                       { label: "YTD", getValue: () => ({ from: startOfYear(new Date()), to: new Date() }) },
                       { label: "ALL", getValue: () => ({ from: stockData.length > 0 ? parseISO(stockData[0].time) : new Date(), to: stockData.length > 0 ? parseISO(stockData[stockData.length - 1].time) : new Date() }) },
                     ].map((p) => {
-                      const isActive = p.label === "ALL" && startDate === stockData[0]?.time && endDate === stockData[stockData.length - 1]?.time;
+                      const range = p.getValue();
+                      const rangeStartStr = format(range.from, "yyyy-MM-dd");
+                      const rangeEndStr = format(range.to, "yyyy-MM-dd");
+                      const isActive = startDate === rangeStartStr && endDate === rangeEndStr;
+                      
                       return (
                         <button
                           key={p.label}
                           onClick={() => {
-                            const range = p.getValue();
-                            setStartDate(format(range.from, "yyyy-MM-dd"));
-                            setEndDate(format(range.to, "yyyy-MM-dd"));
+                            setStartDate(rangeStartStr);
+                            setEndDate(rangeEndStr);
                           }}
                           className={cn(
-                            "px-2 py-1 text-[9px] font-black rounded-lg transition-all uppercase tracking-tight",
+                            "px-1.5 py-1 text-[8px] font-black rounded-md transition-all tracking-tighter",
                             isActive 
                               ? "bg-white text-primary shadow-sm border border-slate-200" 
                               : "text-slate-400 hover:text-slate-600 hover:bg-white/50"
@@ -264,10 +320,10 @@ export function BacktestDashboard() {
                     })}
                   </div>
 
-                  <div className="h-3 w-[1px] bg-slate-300" />
+                  <div className="h-4 w-[1px] bg-slate-200 mx-0.5 flex-shrink-0" />
                   
-                  {/* Official Shadcn Date Picker */}
-                  <div className="flex items-center gap-2 scale-[0.85] origin-left">
+                  {/* Date Picker */}
+                  <div className="flex items-center scale-[0.82] origin-left flex-shrink-0 max-w-[180px]">
                     <DatePickerWithRange
                       date={{
                         from: startDate ? parseISO(startDate) : undefined,
@@ -283,12 +339,80 @@ export function BacktestDashboard() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-widest">
-                    <TrendingUp className="h-3 w-3" />
-                    数据源: EFinance
-                  </div>
-                  <Settings2 className="h-4 w-4 text-slate-300 hover:text-primary cursor-pointer transition-colors" />
+                <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+                  <div className="h-4 w-[1px] bg-slate-200 mx-1 flex-shrink-0" />
+                  
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className={cn(
+                        "p-2 rounded-xl transition-all relative group",
+                        activeSmas.length > 0
+                          ? "bg-primary/10 text-primary shadow-sm border border-primary/20"
+                          : "bg-slate-50/50 text-slate-400 hover:text-slate-600 border border-transparent"
+                      )}>
+                        <Settings2 className="h-4 w-4" />
+                        {activeSmas.length > 0 && (
+                          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-primary border-2 border-white rounded-full animate-pulse" />
+                        )}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-4 rounded-3xl border-slate-100 shadow-2xl bg-white z-[100]">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-[#1A1523]/40">均线指标 (MA)</span>
+                          <span className="text-[9px] font-bold text-primary/60">{activeSmas.length} 已选</span>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {[
+                            { p: 20, color: "#0ea5e9" },
+                            { p: 50, color: "#10b981" },
+                            { p: 120, color: "#8b5cf6" },
+                            { p: 200, color: "#64748b" },
+                          ].map(({ p, color }) => (
+                            <button
+                              key={p}
+                              onClick={() => {
+                                setActiveSmas((prev) =>
+                                  prev.includes(p)
+                                    ? prev.filter((x) => x !== p)
+                                    : [...prev, p],
+                                );
+                              }}
+                              className={cn(
+                                "w-full flex items-center justify-between p-2 rounded-xl border transition-all text-left",
+                                activeSmas.includes(p)
+                                  ? "bg-slate-50 border-slate-200 shadow-sm"
+                                  : "border-transparent text-slate-400 hover:bg-slate-50"
+                              )}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                                <span className={cn(
+                                  "text-[11px] font-bold",
+                                  activeSmas.includes(p) ? "text-slate-800" : "text-slate-400"
+                                )}>
+                                  MA{p} 日均线
+                                </span>
+                              </div>
+                              {activeSmas.includes(p) && (
+                                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-50">
+                          <button
+                            onClick={() => setActiveSmas([])}
+                            className="w-full text-center py-2 text-[10px] font-black text-slate-400 hover:text-slate-600 transition-colors uppercase"
+                          >
+                            清空所有指标
+                          </button>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
 
@@ -296,6 +420,7 @@ export function BacktestDashboard() {
                 <div className="p-6 h-full flex flex-col justify-center">
                   <PriceChart
                     data={filteredData}
+                    smaData={baseSmasMap}
                     results={multiResult.results}
                     height={440}
                   />
@@ -305,33 +430,31 @@ export function BacktestDashboard() {
           </div>
 
           <div className="lg:col-span-3">
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 card-shadow h-full flex flex-col justify-between">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-primary" />
-                    <span className="text-xs font-black uppercase tracking-widest text-[#1A1523]/60">
-                      活跃策略层
-                    </span>
-                  </div>
-                  <Info className="h-3.5 w-3.5 text-slate-300 cursor-help" />
+            <Card className="flex flex-col border-none shadow-2xl bg-white/70 backdrop-blur-3xl rounded-[2rem] overflow-hidden h-full">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white relative z-10">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-primary" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#1A1523]/40">
+                    活跃策略层
+                  </span>
                 </div>
-
-                <div className="space-y-3">
-                  <StrategySelector
-                    strategies={STRATEGY_CONFIGS}
-                    selectedIds={selectedStrategyIds}
-                    onToggle={toggleStrategy}
-                  />
-                </div>
+                <Info className="h-3.5 w-3.5 text-slate-200 cursor-help" />
               </div>
 
-              <div className="pt-6 border-t border-slate-100">
-                <p className="text-[10px] leading-tight text-slate-400 font-bold uppercase tracking-widest text-center">
-                  量化算法提取引擎
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-white/50">
+                <StrategySelector
+                  strategies={STRATEGY_CONFIGS}
+                  selectedIds={selectedStrategyIds}
+                  onToggle={toggleStrategy}
+                />
+              </div>
+
+              <div className="p-4 bg-slate-50/50 border-t border-slate-100">
+                <p className="text-[9px] leading-relaxed text-slate-400 italic">
+                  * 策略信号基于收盘价计算，回测结果不考虑滑点与手续费。
                 </p>
               </div>
-            </div>
+            </Card>
           </div>
         </div>
 

@@ -16,7 +16,7 @@ export function StrategySelector({
   onToggle,
 }: StrategySelectorProps) {
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-1.5">
       {strategies.map((strat) => {
         const isActive = selectedIds.includes(strat.id);
         return (
@@ -25,44 +25,45 @@ export function StrategySelector({
             key={strat.id}
             onClick={() => onToggle(strat.id)}
             className={cn(
-              "group p-3.5 rounded-xl border text-left transition-all duration-300 relative overflow-hidden",
+              "group px-3 py-2.5 rounded-xl border transition-all duration-200 relative flex items-center gap-3",
               isActive 
-                ? "bg-primary border-primary shadow-md shadow-primary/20" 
-                : "bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50"
+                ? "bg-slate-50 border-primary shadow-sm" 
+                : "bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50/50"
             )}
           >
-            <div className="flex items-center justify-between mb-2">
-              <div className={cn(
-                "h-7 w-7 rounded-lg flex items-center justify-center transition-colors",
-                isActive ? "bg-white/20" : "bg-slate-50"
-              )}>
-                <Target className={cn("h-3.5 w-3.5", isActive ? "text-white" : "text-primary")} />
-              </div>
-              <div className={cn(
-                "h-4 w-4 rounded-full border flex items-center justify-center transition-all",
-                isActive ? "bg-white border-white" : "bg-transparent border-slate-200 group-hover:border-slate-300"
-              )}>
-                {isActive && <Check className="h-2.5 w-2.5 text-primary" />}
-              </div>
-            </div>
+            <div 
+              className={cn(
+                "h-1.5 w-1.5 rounded-full flex-shrink-0 transition-all duration-300",
+                !isActive && "bg-slate-300 group-hover:bg-slate-400"
+              )} 
+              style={isActive ? { 
+                backgroundColor: strat.color, 
+                boxShadow: `0 0 8px ${strat.color}66`,
+                transform: 'scale(1.25)' 
+              } : {}}
+            />
 
-            <div className="space-y-0.5">
-              <span className={cn(
-                "text-xs font-black tracking-tight block uppercase",
-                isActive ? "text-white" : "text-slate-700"
+            <div className="flex-1 min-w-0 pr-6">
+              <div className={cn(
+                "text-[10.5px] font-bold truncate transition-colors",
+                isActive ? "text-slate-900" : "text-slate-500 group-hover:text-slate-700"
               )}>
                 {strat.name}
-              </span>
-              <div className="flex flex-wrap gap-1 pt-1.5 opacity-80">
+              </div>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5 opacity-60">
                  {Object.entries(strat.params).map(([key, val]) => (
-                   <span key={key} className={cn(
-                     "text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded",
-                     isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-400"
-                   )}>
-                     {key}: {val}
+                   <span key={key} className="text-[8px] font-medium tracking-tight text-slate-400">
+                     {key.charAt(0).toUpperCase() + key.slice(1)}: <span className="font-bold">{val}</span>
                    </span>
                  ))}
               </div>
+            </div>
+
+            <div className={cn(
+              "absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 rounded-full border flex items-center justify-center transition-all",
+              isActive ? "bg-primary border-primary" : "bg-transparent border-slate-200 group-hover:border-slate-300"
+            )}>
+              {isActive && <Check className="h-2.5 w-2.5 text-white" />}
             </div>
           </button>
         );

@@ -13,7 +13,11 @@ export type Signal = "BUY" | "SELL" | null;
 
 export interface BaseStrategy {
   id: string;
-  generateSignals: (data: Candle[], params: Record<string, any>) => Signal[];
+  generateSignals: (
+    data: Candle[], 
+    params: Record<string, any>,
+    marketContext?: Record<string, Candle[]>
+  ) => Signal[];
 }
 
 export interface Trade {
@@ -31,6 +35,7 @@ export interface StrategyDefinition {
   id: string;
   name: string;
   params: Record<string, any>;
+  color: string;
 }
 
 export interface StrategyConfig extends StrategyDefinition {
@@ -40,6 +45,7 @@ export interface StrategyConfig extends StrategyDefinition {
 export interface StrategyResult {
   strategyId: string;
   strategyName: string;
+  color: string;
   totalReturn: number;
   winRate: number;
   maxDrawdown: number;

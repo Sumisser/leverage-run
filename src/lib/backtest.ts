@@ -11,6 +11,7 @@ export function runBacktest(
   data: Candle[],
   strategies: StrategyConfig[],
   capital: number,
+  marketContext: Record<string, Candle[]> = {},
 ): MultiBacktestResult {
   const results: StrategyResult[] = strategies.map((stratConfig) => {
     const prices = data.map((c) => c.close);
@@ -22,8 +23,12 @@ export function runBacktest(
     const equityCurve: { time: string; value: number }[] = [];
     const absoluteEquity: number[] = [];
 
-    // Get signals from the implementation provided in the config
-    const signals: Signal[] = stratConfig.implementation.generateSignals(data, stratConfig.params);
+    // Pass marketContext for multi-asset logic
+    const signals: Signal[] = stratConfig.implementation.generateSignals(
+      data,
+      stratConfig.params,
+      marketContext,
+    );
 
     // Execution Engine
     for (let i = 0; i < data.length; i++) {
@@ -96,6 +101,7 @@ export function runBacktest(
     return {
       strategyId: stratConfig.id,
       strategyName: stratConfig.name,
+      color: stratConfig.color,
       totalReturn,
       winRate,
       maxDrawdown: maxDD,

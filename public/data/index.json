@@ -5,6 +5,11 @@
     "fileName": "三倍做多纳斯达克100ETF-ProShare_TQQQ.json"
   },
   {
+    "name": "标普500ETF-SPDR",
+    "code": "SPY",
+    "fileName": "标普500ETF-SPDR_SPY.json"
+  },
+  {
     "name": "纳斯达克100ETF-Invesco",
     "code": "QQQ",
     "fileName": "纳斯达克100ETF-Invesco_QQQ.json"
