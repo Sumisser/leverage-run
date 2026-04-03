@@ -1,13 +1,15 @@
-'use client';
+"use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { runBacktest } from "@/lib/backtest";
 import { Candle, StrategyResult, StrategyConfig } from "@/lib/types";
 import { PriceChart } from "./PriceChart";
 import { StrategySelector } from "./StrategySelector";
+import { StrategyModal } from "./StrategyModal";
 import { Card, CardContent } from "@/components/ui/card";
 import { Logo } from "@/components/ui/Logo";
-import { STRATEGY_CONFIGS } from "@/strategies";
+import { STRATEGY_CONFIGS, BENCHMARK_CONFIG } from "@/strategies";
 import {
   Trophy,
   TrendingUp,
@@ -18,10 +20,16 @@ import {
   ChevronDown,
   Info,
   Scale,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { format, parseISO, subMonths, subYears, startOfYear } from "date-fns";
@@ -34,17 +42,22 @@ interface AssetInfo {
 }
 
 export function BacktestDashboard() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [assetsList, setAssetsList] = useState<AssetInfo[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<AssetInfo | null>(null);
   const [stockData, setStockData] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedStrategyIds, setSelectedStrategyIds] = useState<string[]>([
-    STRATEGY_CONFIGS[0].id,
+  const [activeStrategies, setActiveStrategies] = useState<StrategyConfig[]>([
+    BENCHMARK_CONFIG,
   ]);
-  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   // Market context for multi-asset strategies (e.g. QQQ as signal)
-  const [marketContext, setMarketContext] = useState<Record<string, Candle[]>>({});
+  const [marketContext, setMarketContext] = useState<Record<string, Candle[]>>(
+    {},
+  );
 
   // SMA Periods Multi-selection
   const [activeSmas, setActiveSmas] = useState<number[]>([]);
@@ -57,34 +70,36 @@ export function BacktestDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    fetch('/data/index.json')
-      .then(res => res.json())
-      .then(data => {
+    fetch("/data/index.json")
+      .then((res) => res.json())
+      .then((data) => {
         setAssetsList(data);
         if (data.length > 0) {
           setSelectedAsset(data[0]);
-          
+
           // Pre-load QQQ for strategies that need it
-          const qqq = data.find((a: AssetInfo) => a.code === 'QQQ');
+          const qqq = data.find((a: AssetInfo) => a.code === "QQQ");
           if (qqq) {
             fetch(`/data/${qqq.fileName}`)
-              .then(res => res.json())
-              .then(result => {
-                 setMarketContext(prev => ({ ...prev, QQQ: result.data }));
+              .then((res) => res.json())
+              .then((result) => {
+                setMarketContext((prev) => ({ ...prev, QQQ: result.data }));
               })
-              .catch(err => console.error("Failed to load QQQ for market context:", err));
+              .catch((err) =>
+                console.error("Failed to load QQQ for market context:", err),
+              );
           }
         }
       })
-      .catch(err => console.error("Failed to load assets index:", err));
+      .catch((err) => console.error("Failed to load assets index:", err));
   }, []);
 
   useEffect(() => {
     if (!selectedAsset) return;
     setLoading(true);
     fetch(`/data/${selectedAsset.fileName}`)
-      .then(res => res.json())
-      .then(result => {
+      .then((res) => res.json())
+      .then((result) => {
         setStockData(result.data);
         if (result.data.length > 0) {
           // Initialize range to full history of the selected asset
@@ -93,16 +108,36 @@ export function BacktestDashboard() {
         }
         setLoading(false);
       })
-      .catch(err => {
+      .catch((err) => {
         console.error("Failed to load asset data:", err);
         setLoading(false);
       });
   }, [selectedAsset]);
 
+  // Handle addition from URL (coming from strategy management page)
+  useEffect(() => {
+    if (mounted) {
+      const addIds = searchParams.get("add")?.split(",") || [];
+      if (addIds.length > 0) {
+        const toAdd = STRATEGY_CONFIGS.filter(
+          (s) =>
+            addIds.includes(s.id) &&
+            !activeStrategies.find((ps) => ps.id === s.id),
+        );
+
+        if (toAdd.length > 0) {
+          setActiveStrategies((prev) => [...prev, ...toAdd]);
+          // Clear param
+          router.replace("/");
+        }
+      }
+    }
+  }, [mounted, searchParams, activeStrategies, router]);
+
   // Apply Date Filtering
   const filteredData = useMemo(() => {
     if (!startDate || !endDate) return stockData;
-    return stockData.filter(c => c.time >= startDate && c.time <= endDate);
+    return stockData.filter((c) => c.time >= startDate && c.time <= endDate);
   }, [stockData, startDate, endDate]);
 
   // Calculate selected SMAs for the base asset
@@ -110,94 +145,76 @@ export function BacktestDashboard() {
     const results: Record<number, { time: string; value: number }[]> = {};
     if (stockData.length === 0) return results;
 
-    activeSmas.forEach(period => {
+    activeSmas.forEach((period) => {
       if (stockData.length < period) return;
-      
-      const prices = stockData.map(c => c.close);
+
+      const prices = stockData.map((c) => c.close);
       const sma: number[] = [];
       let sum = 0;
       for (let i = 0; i < prices.length; i++) {
-         sum += prices[i];
-         if (i >= period) sum -= prices[i - period];
-         if (i < period - 1) sma.push(NaN);
-         else sma.push(sum / period);
+        sum += prices[i];
+        if (i >= period) sum -= prices[i - period];
+        if (i < period - 1) sma.push(NaN);
+        else sma.push(sum / period);
       }
-      
+
       results[period] = stockData
         .map((c, i) => ({ time: c.time, value: sma[i] }))
-        .filter(item => item.time >= startDate && item.time <= endDate && !isNaN(item.value));
+        .filter(
+          (item) =>
+            item.time >= startDate &&
+            item.time <= endDate &&
+            !isNaN(item.value),
+        );
     });
-    
+
     return results;
   }, [stockData, startDate, endDate, activeSmas]);
-
-  // Compute Benchmark (Buy & Hold) Stats based on filtered range
-  const benchmarkResult = useMemo(() => {
-    if (filteredData.length < 2) return null;
-    const first = filteredData[0].close;
-    const last = filteredData[filteredData.length - 1].close;
-    const totalReturn = last / first - 1;
-
-    let peak = -Infinity;
-    let maxDd = 0;
-    for (const c of filteredData) {
-      if (c.close > peak) peak = c.close;
-      const dd = (peak - c.close) / peak;
-      if (dd > maxDd) maxDd = dd;
-    }
-
-    return {
-      strategyId: "benchmark",
-      strategyName: "买入持有 (Benchmark)",
-      totalReturn,
-      winRate: 1, 
-      maxDrawdown: maxDd,
-      sharpeRatio: 0,
-      trades: [],
-      equityCurve: [], 
-    };
-  }, [filteredData]);
-
-  const selectedStrats = useMemo(
-    () =>
-      STRATEGY_CONFIGS.filter((s) => selectedStrategyIds.includes(s.id)),
-    [selectedStrategyIds],
-  );
 
   const multiResult = useMemo(() => {
     if (!mounted || filteredData.length === 0)
       return { symbol: selectedAsset?.code || "LOADING", results: [] };
-    return runBacktest(filteredData, selectedStrats, capital, marketContext);
-  }, [filteredData, selectedStrats, capital, mounted, selectedAsset, marketContext]);
+    // Run for all active strategies (including benchmark if it's in the list)
+    return runBacktest(filteredData, activeStrategies, capital, marketContext);
+  }, [
+    filteredData,
+    activeStrategies,
+    capital,
+    mounted,
+    selectedAsset,
+    marketContext,
+  ]);
 
-  // Combined Results with Alpha
+  // Leaderboard Data
   const leaderboardData = useMemo(() => {
-    if (!benchmarkResult) return [];
+    // Find benchmark result for relative Alpha calculation
+    const benchRes = multiResult.results.find(
+      (r) => r.strategyId === "benchmark",
+    );
+
     const resultsWithAlpha = multiResult.results.map((res: StrategyResult) => ({
       ...res,
-      alpha: res.totalReturn - benchmarkResult.totalReturn,
+      alpha: benchRes ? res.totalReturn - benchRes.totalReturn : 0,
       winRate: (res.winRate * 100).toFixed(1) + "%",
       tradeCount: res.trades.length,
+      isBenchmark: res.strategyId === "benchmark",
     }));
 
-    // Add benchmark row
-    const benchmarkRow = {
-      ...benchmarkResult,
-      alpha: 0,
-      winRate: "--",
-      tradeCount: 1,
-      isBenchmark: true,
-    };
+    return resultsWithAlpha.sort((a, b) => b.totalReturn - a.totalReturn);
+  }, [multiResult.results]);
 
-    return [...resultsWithAlpha, benchmarkRow].sort(
-      (a, b) => b.totalReturn - a.totalReturn,
-    );
-  }, [multiResult.results, benchmarkResult]);
+  const removeStrategy = (id: string) => {
+    if (id === "benchmark") return; // Cannot remove benchmark
+    setActiveStrategies((prev) => prev.filter((s) => s.id !== id));
+  };
 
-  const toggleStrategy = (id: string) => {
-    setSelectedStrategyIds((prev: string[]) =>
-      prev.includes(id) ? prev.filter((sid: string) => sid !== id) : [...prev, id],
-    );
+  const addStrategies = (strats: StrategyConfig[]) => {
+    setActiveStrategies((prev) => {
+      const newStrats = strats.filter(
+        (s) => !prev.find((ps) => ps.id === s.id),
+      );
+      return [...prev, ...newStrats];
+    });
   };
 
   if (!mounted) return null;
@@ -207,17 +224,30 @@ export function BacktestDashboard() {
       <header className="px-6 md:px-12 py-3 border-b border-slate-200 bg-white sticky top-0 z-50">
         <div className="max-w-[1400px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-12">
-            <Logo className="hover:opacity-80 transition-opacity cursor-pointer" />
+            <Logo
+              className="hover:opacity-80 transition-opacity cursor-pointer"
+              onClick={() => router.push("/")}
+            />
             <nav className="hidden md:flex items-center gap-8">
-              <span className="text-xs font-bold opacity-50 hover:opacity-100 cursor-pointer transition-opacity">
+              <span className="text-xs font-bold opacity-100 cursor-pointer transition-opacity">
                 回测实验室
               </span>
-              <span className="text-xs font-bold opacity-50 hover:opacity-100 cursor-pointer transition-opacity">
+              <span
+                onClick={() => router.push("/strategies")}
+                className="text-xs font-bold opacity-50 hover:opacity-100 cursor-pointer transition-opacity"
+              >
                 实时信号流
               </span>
             </nav>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.push("/strategies")}
+              className="h-10 w-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full transition-all group shadow-sm"
+              title="策略管理"
+            >
+              <LayoutGrid className="h-5 w-5 text-slate-500 group-hover:text-primary transition-colors" />
+            </button>
             <div className="px-5 py-2 bg-primary rounded-full text-white text-[11px] font-black shadow-lg shadow-primary/10 hover:shadow-primary/30 transition-all cursor-pointer uppercase tracking-widest">
               保存当前配置
             </div>
@@ -229,8 +259,7 @@ export function BacktestDashboard() {
         <section className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="max-w-xl">
             <h2 className="text-3xl heading-serif mb-2 leading-tight">
-              策略实验室{" "}
-              <span className="italic text-primary">Alpha Edition</span>
+              策略实验室 <span className="italic text-primary">Alpha Lab</span>
             </h2>
             <p className="text-sm opacity-60 font-medium max-w-lg">
               对比多种量化战术与基准资产的表现，寻找稳定的 Alpha 超额收益。
@@ -244,16 +273,18 @@ export function BacktestDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
           <div className="lg:col-span-9">
-            <Card className="flex-1 flex flex-col border-none shadow-2xl bg-white/70 backdrop-blur-3xl rounded-[2rem] relative">
+            <Card className="flex-1 flex flex-col shadow-none border border-slate-100 bg-white/70 backdrop-blur-3xl rounded-[2rem] relative overflow-hidden">
               {loading && (
                 <div className="absolute inset-0 z-[70] bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
                   <div className="flex flex-col items-center gap-3">
                     <RefreshCw className="h-6 w-6 text-primary animate-spin" />
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-40">同步云端数据...</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-40">
+                      同步云端数据...
+                    </span>
                   </div>
                 </div>
               )}
-              
+
               <div className="flex flex-wrap items-center justify-between px-3 py-2 border-b border-slate-100 gap-x-3 gap-y-2 relative z-[60] bg-white rounded-t-[2rem]">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <div className="flex items-center gap-1 flex-shrink-0">
@@ -283,23 +314,72 @@ export function BacktestDashboard() {
                   </div>
 
                   <div className="h-4 w-[1px] bg-slate-200 mx-0.5 flex-shrink-0" />
-                  
+
                   {/* Quick Range Presets */}
                   <div className="flex items-center gap-0.5 p-0.5 bg-slate-100/60 rounded-lg flex-shrink-0">
                     {[
-                      { label: "1M", getValue: () => ({ from: subMonths(new Date(), 1), to: new Date() }) },
-                      { label: "3M", getValue: () => ({ from: subMonths(new Date(), 3), to: new Date() }) },
-                      { label: "1Y", getValue: () => ({ from: subYears(new Date(), 1), to: new Date() }) },
-                      { label: "5Y", getValue: () => ({ from: subYears(new Date(), 5), to: new Date() }) },
-                      { label: "10Y", getValue: () => ({ from: subYears(new Date(), 10), to: new Date() }) },
-                      { label: "YTD", getValue: () => ({ from: startOfYear(new Date()), to: new Date() }) },
-                      { label: "ALL", getValue: () => ({ from: stockData.length > 0 ? parseISO(stockData[0].time) : new Date(), to: stockData.length > 0 ? parseISO(stockData[stockData.length - 1].time) : new Date() }) },
+                      {
+                        label: "1M",
+                        getValue: () => ({
+                          from: subMonths(new Date(), 1),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "3M",
+                        getValue: () => ({
+                          from: subMonths(new Date(), 3),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "1Y",
+                        getValue: () => ({
+                          from: subYears(new Date(), 1),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "5Y",
+                        getValue: () => ({
+                          from: subYears(new Date(), 5),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "10Y",
+                        getValue: () => ({
+                          from: subYears(new Date(), 10),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "YTD",
+                        getValue: () => ({
+                          from: startOfYear(new Date()),
+                          to: new Date(),
+                        }),
+                      },
+                      {
+                        label: "ALL",
+                        getValue: () => ({
+                          from:
+                            stockData.length > 0
+                              ? parseISO(stockData[0].time)
+                              : new Date(),
+                          to:
+                            stockData.length > 0
+                              ? parseISO(stockData[stockData.length - 1].time)
+                              : new Date(),
+                        }),
+                      },
                     ].map((p) => {
                       const range = p.getValue();
                       const rangeStartStr = format(range.from, "yyyy-MM-dd");
                       const rangeEndStr = format(range.to, "yyyy-MM-dd");
-                      const isActive = startDate === rangeStartStr && endDate === rangeEndStr;
-                      
+                      const isActive =
+                        startDate === rangeStartStr && endDate === rangeEndStr;
+
                       return (
                         <button
                           key={p.label}
@@ -309,9 +389,9 @@ export function BacktestDashboard() {
                           }}
                           className={cn(
                             "px-1.5 py-1 text-[8px] font-black rounded-md transition-all tracking-tighter",
-                            isActive 
-                              ? "bg-white text-primary shadow-sm border border-slate-200" 
-                              : "text-slate-400 hover:text-slate-600 hover:bg-white/50"
+                            isActive
+                              ? "bg-white text-primary shadow-sm border border-slate-200"
+                              : "text-slate-400 hover:text-slate-600 hover:bg-white/50",
                           )}
                         >
                           {p.label}
@@ -321,7 +401,7 @@ export function BacktestDashboard() {
                   </div>
 
                   <div className="h-4 w-[1px] bg-slate-200 mx-0.5 flex-shrink-0" />
-                  
+
                   {/* Date Picker */}
                   <div className="flex items-center scale-[0.82] origin-left flex-shrink-0 max-w-[180px]">
                     <DatePickerWithRange
@@ -329,11 +409,21 @@ export function BacktestDashboard() {
                         from: startDate ? parseISO(startDate) : undefined,
                         to: endDate ? parseISO(endDate) : undefined,
                       }}
-                      minDate={stockData.length > 0 ? parseISO(stockData[0].time) : undefined}
-                      maxDate={stockData.length > 0 ? parseISO(stockData[stockData.length - 1].time) : undefined}
+                      minDate={
+                        stockData.length > 0
+                          ? parseISO(stockData[0].time)
+                          : undefined
+                      }
+                      maxDate={
+                        stockData.length > 0
+                          ? parseISO(stockData[stockData.length - 1].time)
+                          : undefined
+                      }
                       setDate={(range) => {
-                        if (range?.from) setStartDate(format(range.from, "yyyy-MM-dd"));
-                        if (range?.to) setEndDate(format(range.to, "yyyy-MM-dd"));
+                        if (range?.from)
+                          setStartDate(format(range.from, "yyyy-MM-dd"));
+                        if (range?.to)
+                          setEndDate(format(range.to, "yyyy-MM-dd"));
                       }}
                     />
                   </div>
@@ -341,15 +431,17 @@ export function BacktestDashboard() {
 
                 <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
                   <div className="h-4 w-[1px] bg-slate-200 mx-1 flex-shrink-0" />
-                  
+
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button className={cn(
-                        "p-2 rounded-xl transition-all relative group",
-                        activeSmas.length > 0
-                          ? "bg-primary/10 text-primary shadow-sm border border-primary/20"
-                          : "bg-slate-50/50 text-slate-400 hover:text-slate-600 border border-transparent"
-                      )}>
+                      <button
+                        className={cn(
+                          "p-2 rounded-xl transition-all relative group",
+                          activeSmas.length > 0
+                            ? "bg-primary/10 text-primary shadow-sm border border-primary/20"
+                            : "bg-slate-50/50 text-slate-400 hover:text-slate-600 border border-transparent",
+                        )}
+                      >
                         <Settings2 className="h-4 w-4" />
                         {activeSmas.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-primary border-2 border-white rounded-full animate-pulse" />
@@ -359,10 +451,14 @@ export function BacktestDashboard() {
                     <PopoverContent className="w-56 p-4 rounded-3xl border-slate-100 shadow-2xl bg-white z-[100]">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-[#1A1523]/40">均线指标 (MA)</span>
-                          <span className="text-[9px] font-bold text-primary/60">{activeSmas.length} 已选</span>
+                          <span className="text-[10px] font-black uppercase tracking-widest text-[#1A1523]/40">
+                            均线指标 (MA)
+                          </span>
+                          <span className="text-[9px] font-bold text-primary/60">
+                            {activeSmas.length} 已选
+                          </span>
                         </div>
-                        
+
                         <div className="space-y-2">
                           {[
                             { p: 20, color: "#0ea5e9" },
@@ -383,15 +479,22 @@ export function BacktestDashboard() {
                                 "w-full flex items-center justify-between p-2 rounded-xl border transition-all text-left",
                                 activeSmas.includes(p)
                                   ? "bg-slate-50 border-slate-200 shadow-sm"
-                                  : "border-transparent text-slate-400 hover:bg-slate-50"
+                                  : "border-transparent text-slate-400 hover:bg-slate-50",
                               )}
                             >
                               <div className="flex items-center gap-2.5">
-                                <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                                <span className={cn(
-                                  "text-[11px] font-bold",
-                                  activeSmas.includes(p) ? "text-slate-800" : "text-slate-400"
-                                )}>
+                                <div
+                                  className="h-2 w-2 rounded-full"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span
+                                  className={cn(
+                                    "text-[11px] font-bold",
+                                    activeSmas.includes(p)
+                                      ? "text-slate-800"
+                                      : "text-slate-400",
+                                  )}
+                                >
                                   MA{p} 日均线
                                 </span>
                               </div>
@@ -430,7 +533,7 @@ export function BacktestDashboard() {
           </div>
 
           <div className="lg:col-span-3">
-            <Card className="flex flex-col border-none shadow-2xl bg-white/70 backdrop-blur-3xl rounded-[2rem] overflow-hidden h-full">
+            <Card className="flex flex-col shadow-none border border-slate-100 bg-white/70 backdrop-blur-3xl rounded-[2rem] overflow-hidden h-full">
               <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white relative z-10">
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-primary" />
@@ -438,14 +541,19 @@ export function BacktestDashboard() {
                     活跃策略层
                   </span>
                 </div>
-                <Info className="h-3.5 w-3.5 text-slate-200 cursor-help" />
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="h-8 w-8 rounded-full bg-primary/5 hover:bg-primary/10 text-primary flex items-center justify-center transition-all group"
+                  title="添加策略"
+                >
+                  <Plus className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-white/50">
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-white/50 space-y-4">
                 <StrategySelector
-                  strategies={STRATEGY_CONFIGS}
-                  selectedIds={selectedStrategyIds}
-                  onToggle={toggleStrategy}
+                  strategies={activeStrategies}
+                  onRemove={removeStrategy}
                 />
               </div>
 
@@ -613,6 +721,13 @@ export function BacktestDashboard() {
           </div>
         </section>
       </main>
+
+      <StrategyModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        activeStrategyIds={activeStrategies.map((s) => s.id)}
+        onAddBatch={addStrategies}
+      />
     </div>
   );
 }

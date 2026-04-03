@@ -4,6 +4,7 @@ import { marketGuardStrategy } from "./trend";
 import { rsiStrategy } from "./mean_reversion";
 import { dualEmaStrategy } from "./dual_ma";
 import { turtleStrategy } from "./turtle";
+import { benchmarkStrategy } from "./benchmark";
 
 /**
  * Centrally manages all strategy definitions and their implementations.
@@ -64,6 +65,14 @@ export const STRATEGY_CONFIGS: StrategyConfig[] = [
     color: STRATEGY_COLORS[4],
   },
 ];
+
+export const BENCHMARK_CONFIG: StrategyConfig = {
+  id: "benchmark",
+  name: "买入持有 (Benchmark)",
+  params: {},
+  implementation: benchmarkStrategy,
+  color: "#64748b",
+};
 
 export function getStrategyConfig(id: string): StrategyConfig | undefined {
   return STRATEGY_CONFIGS.find((config) => config.id === id);

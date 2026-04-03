@@ -1,8 +1,8 @@
 import React from 'react';
 
-export function Logo({ className = "" }: { className?: string }) {
+export function Logo({ className = "", onClick }: { className?: string; onClick?: () => void }) {
   return (
-    <div className={`flex items-center gap-3 ${className}`}>
+    <div className={`flex items-center gap-3 ${className}`} onClick={onClick}>
       <svg 
         width="38" 
         height="38" 
